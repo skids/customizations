@@ -23,6 +23,8 @@ not be as useful if you have only 2. (HP still did manage to make this laptop
 suck with the chiclet keyboard that does not type right when you strike
 the top of the keys, but I digress.)
 
+## What
+
 This patch does two things:
 
 1) It inverts the sense of the control key for the purpose of opening
