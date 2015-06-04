@@ -88,6 +88,8 @@ struct gui_data {
     int pastein_data_len;
     char *pasteout_data, *pasteout_data_ctext, *pasteout_data_utf8;
     int pasteout_data_len, pasteout_data_ctext_len, pasteout_data_utf8_len;
+    char *clipbout_data, *clipbout_data_ctext, *clipbout_data_utf8;
+    int clipbout_data_len, clipbout_data_ctext_len, clipbout_data_utf8_len;
     int font_width, font_height;
     int width, height;
     int ignore_sbar;
@@ -1254,7 +1256,7 @@ gboolean button_internal(struct gui_data *inst, guint32 timestamp,
     ctrl = state & GDK_CONTROL_MASK;
     alt = state & GDK_MOD1_MASK;
 
-    if (ebutton == 3 && ctrl) {
+    if (ebutton == 3 && !ctrl) {
 	gtk_menu_popup(GTK_MENU(inst->menu), NULL, NULL, NULL, NULL,
 		       ebutton, timestamp);
 	return TRUE;
@@ -1828,18 +1830,37 @@ void selection_get(GtkWidget *widget, GtkSelectionData *seldata,
 		   guint info, guint time_stamp, gpointer data)
 {
     struct gui_data *inst = (struct gui_data *)data;
-    if (seldata->target == utf8_string_atom)
-	gtk_selection_data_set(seldata, seldata->target, 8,
-			       (unsigned char *)inst->pasteout_data_utf8,
-			       inst->pasteout_data_utf8_len);
-    else if (seldata->target == compound_text_atom)
-	gtk_selection_data_set(seldata, seldata->target, 8,
-			       (unsigned char *)inst->pasteout_data_ctext,
-			       inst->pasteout_data_ctext_len);
-    else
-	gtk_selection_data_set(seldata, seldata->target, 8,
-			       (unsigned char *)inst->pasteout_data,
-			       inst->pasteout_data_len);
+    if (info == 1) {
+        if (seldata->target == utf8_string_atom)
+            gtk_selection_data_set(seldata, seldata->target, 8,
+			           (unsigned char *)inst->pasteout_data_utf8,
+			           inst->pasteout_data_utf8_len);
+        else if (seldata->target == compound_text_atom)
+	    gtk_selection_data_set(seldata, seldata->target, 8,
+			           (unsigned char *)inst->pasteout_data_ctext,
+			           inst->pasteout_data_ctext_len);
+        else
+	    gtk_selection_data_set(seldata, seldata->target, 8,
+			           (unsigned char *)inst->pasteout_data,
+			           inst->pasteout_data_len);
+    }
+    else if (info == 2) {
+        if (seldata->target == utf8_string_atom)
+            gtk_selection_data_set(seldata, seldata->target, 8,
+			           (unsigned char *)inst->clipbout_data_utf8,
+			           inst->clipbout_data_utf8_len);
+        else if (seldata->target == compound_text_atom)
+	    gtk_selection_data_set(seldata, seldata->target, 8,
+			           (unsigned char *)inst->clipbout_data_ctext,
+			           inst->clipbout_data_ctext_len);
+        else
+	    gtk_selection_data_set(seldata, seldata->target, 8,
+			           (unsigned char *)inst->clipbout_data,
+			           inst->clipbout_data_len);
+    }
+    else {
+	gtk_selection_data_set(seldata, seldata->target, 8, NULL, 0);
+    }
 }
 
 gint selection_clear(GtkWidget *widget, GdkEventSelection *seldata,
@@ -1847,23 +1868,43 @@ gint selection_clear(GtkWidget *widget, GdkEventSelection *seldata,
 {
     struct gui_data *inst = (struct gui_data *)data;
 
-    term_deselect(inst->term);
-    if (inst->pasteout_data)
-	sfree(inst->pasteout_data);
-    if (inst->pasteout_data_ctext)
-	sfree(inst->pasteout_data_ctext);
-    if (inst->pasteout_data_utf8)
-	sfree(inst->pasteout_data_utf8);
-    inst->pasteout_data = NULL;
-    inst->pasteout_data_len = 0;
-    inst->pasteout_data_ctext = NULL;
-    inst->pasteout_data_ctext_len = 0;
-    inst->pasteout_data_utf8 = NULL;
-    inst->pasteout_data_utf8_len = 0;
-    return TRUE;
+    if (seldata->selection == GDK_SELECTION_PRIMARY) {
+        term_deselect(inst->term);
+        if (inst->pasteout_data)
+	    sfree(inst->pasteout_data);
+        if (inst->pasteout_data_ctext)
+            sfree(inst->pasteout_data_ctext);
+        if (inst->pasteout_data_utf8)
+	    sfree(inst->pasteout_data_utf8);
+        inst->pasteout_data = NULL;
+        inst->pasteout_data_len = 0;
+        inst->pasteout_data_ctext = NULL;
+        inst->pasteout_data_ctext_len = 0;
+        inst->pasteout_data_utf8 = NULL;
+        inst->pasteout_data_utf8_len = 0;
+        return TRUE;
+    }
+    else if (seldata->selection == GDK_SELECTION_CLIPBOARD) {
+        if (inst->clipbout_data)
+	    sfree(inst->clipbout_data);
+        if (inst->clipbout_data_ctext)
+            sfree(inst->clipbout_data_ctext);
+        if (inst->clipbout_data_utf8)
+	    sfree(inst->clipbout_data_utf8);
+        inst->clipbout_data = NULL;
+        inst->clipbout_data_len = 0;
+        inst->clipbout_data_ctext = NULL;
+        inst->clipbout_data_ctext_len = 0;
+        inst->clipbout_data_utf8 = NULL;
+        inst->clipbout_data_utf8_len = 0;
+        return TRUE;
+    }
+    else {
+        return TRUE;
+    }
 }
 
-void request_paste(void *frontend)
+void request_paste_of(void *frontend, GdkAtom gdk_selection)
 {
     struct gui_data *inst = (struct gui_data *)frontend;
     /*
@@ -1880,7 +1921,7 @@ void request_paste(void *frontend)
 	 * fails, selection_received() will be informed and will
 	 * fall back to an ordinary string.
 	 */
-	gtk_selection_convert(inst->area, GDK_SELECTION_PRIMARY,
+	gtk_selection_convert(inst->area, gdk_selection,
 			      utf8_string_atom,
 			      inst->input_event_time);
     } else {
@@ -1888,10 +1929,15 @@ void request_paste(void *frontend)
 	 * If we're in direct-to-font mode, we disable UTF-8
 	 * pasting, and go straight to ordinary string data.
 	 */
-	gtk_selection_convert(inst->area, GDK_SELECTION_PRIMARY,
+	gtk_selection_convert(inst->area, gdk_selection,
 			      GDK_SELECTION_TYPE_STRING,
 			      inst->input_event_time);
     }
+}
+
+void request_paste(void *frontend)
+{
+    request_paste_of(frontend, GDK_SELECTION_PRIMARY);
 }
 
 gint idle_paste_func(gpointer data);   /* forward ref */
@@ -1913,7 +1959,7 @@ void selection_received(GtkWidget *widget, GtkSelectionData *seldata,
 	 * Failed to get a UTF-8 selection string. Try compound
 	 * text next.
 	 */
-	gtk_selection_convert(inst->area, GDK_SELECTION_PRIMARY,
+	gtk_selection_convert(inst->area, seldata->selection,
 			      compound_text_atom,
 			      inst->input_event_time);
 	return;
@@ -1924,7 +1970,7 @@ void selection_received(GtkWidget *widget, GtkSelectionData *seldata,
 	 * Failed to get UTF-8 or compound text. Try an ordinary
 	 * string.
 	 */
-	gtk_selection_convert(inst->area, GDK_SELECTION_PRIMARY,
+	gtk_selection_convert(inst->area, seldata->selection,
 			      GDK_SELECTION_TYPE_STRING,
 			      inst->input_event_time);
 	return;
@@ -1966,7 +2012,7 @@ void selection_received(GtkWidget *widget, GtkSelectionData *seldata,
 		/*
 		 * Compound text failed; fall back to STRING.
 		 */
-		gtk_selection_convert(inst->area, GDK_SELECTION_PRIMARY,
+		gtk_selection_convert(inst->area, seldata->selection,
 				      GDK_SELECTION_TYPE_STRING,
 				      inst->input_event_time);
 		return;
@@ -2973,6 +3019,72 @@ void set_geom_hints(struct gui_data *inst)
                                   GDK_HINT_RESIZE_INC);
 }
 
+void clipboard_copy_menuitem(GtkMenuItem *item, gpointer data)
+{
+    struct gui_data *inst = (struct gui_data *)data;
+
+    void *mem;
+    if (inst->clipbout_data) {
+        mem = inst->clipbout_data;
+        inst->clipbout_data_len = 0;
+        inst->clipbout_data = NULL;
+	sfree(mem);
+    }
+    if (inst->clipbout_data_ctext) {
+        mem = inst->clipbout_data_ctext;
+        inst->clipbout_data_ctext_len = 0;
+        inst->clipbout_data_ctext = NULL;
+	sfree(mem);
+    }
+    if (inst->clipbout_data_utf8) {
+        mem = inst->clipbout_data_utf8;
+        inst->clipbout_data_utf8_len = 0;
+        inst->clipbout_data_utf8 = NULL;
+	sfree(mem);
+    }
+    if (inst->pasteout_data) {
+        mem = snewn(inst->pasteout_data_len, char);
+	memcpy(mem, inst->pasteout_data, inst->pasteout_data_len);
+	inst->clipbout_data = mem;
+	inst->clipbout_data_len = inst->pasteout_data_len;
+    }
+    if (inst->pasteout_data_utf8) {
+        /* On this one they allocate/init an extra \0 terminator but do not count it in _len */
+        mem = snewn(inst->pasteout_data_utf8_len + 1, char);
+	memcpy(mem, inst->pasteout_data_utf8, inst->pasteout_data_utf8_len + 1);
+	inst->clipbout_data_utf8 = mem;
+	inst->clipbout_data_utf8_len = inst->pasteout_data_utf8_len;
+    }
+    if (inst->pasteout_data_ctext) {
+        /* On this one they allocate an extra byte (possibly zeroed) and do not count it in _len */
+        mem = snewn(inst->pasteout_data_ctext_len + 1, char);
+	memcpy(mem, inst->pasteout_data_ctext, inst->pasteout_data_ctext_len + 1);
+	inst->clipbout_data_ctext = mem;
+	inst->clipbout_data_ctext_len = inst->pasteout_data_ctext_len;
+    }
+
+    if (gtk_selection_owner_set(inst->area, GDK_SELECTION_CLIPBOARD,
+				inst->input_event_time)) {
+#if GTK_CHECK_VERSION(2,0,0)
+	gtk_selection_clear_targets(inst->area, GDK_SELECTION_CLIPBOARD);
+#endif
+	gtk_selection_add_target(inst->area, GDK_SELECTION_CLIPBOARD,
+				 GDK_SELECTION_TYPE_STRING, 2);
+	if (inst->pasteout_data_ctext)
+	    gtk_selection_add_target(inst->area, GDK_SELECTION_CLIPBOARD,
+				     compound_text_atom, 2);
+	if (inst->pasteout_data_utf8)
+	    gtk_selection_add_target(inst->area, GDK_SELECTION_CLIPBOARD,
+				     utf8_string_atom, 2);
+    }
+}
+
+void clipboard_paste_menuitem(GtkMenuItem *item, gpointer data)
+{
+    struct gui_data *inst = (struct gui_data *)data;
+    request_paste_of(inst, GDK_SELECTION_CLIPBOARD);
+}
+
 void clear_scrollback_menuitem(GtkMenuItem *item, gpointer data)
 {
     struct gui_data *inst = (struct gui_data *)data;
@@ -3824,6 +3936,9 @@ int pt_main(int argc, char **argv)
             gtk_widget_show(menuitem);                                  \
         } while (0)
 
+        MKMENUITEM("Copy (to clipboard)", clipboard_copy_menuitem);
+        MKMENUITEM("Paste (from clipboard)", clipboard_paste_menuitem);
+	MKSEP();
 	if (new_session)
 	    MKMENUITEM("New Session...", new_session_menuitem);
         MKMENUITEM("Restart Session", restart_session_menuitem);
